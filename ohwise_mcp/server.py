@@ -457,26 +457,23 @@ def _ohwise_headers() -> dict[str, str]:
 
 @mcp.tool()
 def start_pipeline(
+    agent_id: str,
     user_input: str,
-    agent_ids: str = "",
-    coordinator_id: str = "",
 ) -> str:
     """
-    Trigger an OhWise Studio coordinator pipeline.
+    Run an OhWise agent and return the thread_id for polling results.
 
-    Delegates a complex task to OhWise native agents. The coordinator selects
-    and dispatches specialized agents, gathers results, and returns a synthesized answer.
+    Invokes the specified agent with the given user input. The agent executes
+    asynchronously; call get_pipeline_result(thread_id) to retrieve the output.
 
     Requires environment variables: OHWISE_URL, OHWISE_TOKEN.
 
     Parameters
     ----------
+    agent_id : str
+        The OhWise agent ID to invoke (find agent IDs in the Studio UI).
     user_input : str
-        The task or question for the pipeline.
-    agent_ids : str
-        Comma-separated agent IDs to make available. Leave empty to use defaults.
-    coordinator_id : str
-        Coordinator agent ID. Leave empty to use the default coordinator.
+        The task or question to send to the agent.
     """
     import urllib.request
 
@@ -486,21 +483,14 @@ def start_pipeline(
     if not os.environ.get("OHWISE_TOKEN"):
         return json.dumps({"error": "OHWISE_TOKEN environment variable not set."})
 
-    import uuid
-    thread_id = str(uuid.uuid4())
-    group_id = str(uuid.uuid4())
-
     payload = json.dumps({
+        "agent_id": agent_id,
         "user_input": user_input,
-        "thread_id": thread_id,
-        "group_id": group_id,
-        "agent_ids": [a.strip() for a in agent_ids.split(",") if a.strip()],
-        "coordinator_agent_id": coordinator_id or None,
     }).encode()
 
     try:
         req = urllib.request.Request(
-            f"{base_url}/api/internal/coordinator-dispatch",
+            f"{base_url}/api/run-agent",
             data=payload,
             headers=_ohwise_headers(),
             method="POST",
@@ -510,9 +500,10 @@ def start_pipeline(
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 
+    thread_id = body.get("thread_id", "")
     return json.dumps({
         "thread_id": thread_id,
-        "group_id": group_id,
+        "group_id": body.get("group_id", ""),
         "status": "started",
         "tip": f"Call get_pipeline_result(thread_id='{thread_id}') to poll for the result.",
     }, indent=2)
@@ -521,13 +512,13 @@ def start_pipeline(
 @mcp.tool()
 def get_pipeline_result(
     thread_id: str,
-    poll_seconds: int = 30,
+    poll_seconds: int = 60,
 ) -> str:
     """
-    Poll an OhWise Studio pipeline for results.
+    Poll an OhWise agent run for results.
 
-    Waits up to poll_seconds for the pipeline to complete, then returns
-    the latest messages from the coordinator thread.
+    Waits up to poll_seconds for the mission to complete, then returns the
+    log entries and artifacts from the mission snapshot.
 
     Requires environment variables: OHWISE_URL, OHWISE_TOKEN.
 
@@ -536,7 +527,7 @@ def get_pipeline_result(
     thread_id : str
         Thread ID returned by start_pipeline.
     poll_seconds : int
-        How long to wait for completion. Default: 30.
+        How long to wait for completion. Default: 60.
     """
     import urllib.request
 
@@ -548,29 +539,53 @@ def get_pipeline_result(
     while time.time() < deadline:
         try:
             req = urllib.request.Request(
-                f"{base_url}/api/messages?thread_id={thread_id}&limit=10",
+                f"{base_url}/api/missions/{thread_id}",
                 headers=_ohwise_headers(),
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 body = json.loads(resp.read())
-            messages = body.get("data", [])
-            # Look for completed coordinator message
-            for msg in reversed(messages):
-                if msg.get("sender_type") == 1 and msg.get("message_status") == "Completed":
-                    return json.dumps({
-                        "thread_id": thread_id,
-                        "status": "completed",
-                        "content": msg.get("content", ""),
-                        "artifacts": msg.get("artifacts", []),
-                    }, indent=2)
+
+            if not body.get("success"):
+                time.sleep(3)
+                continue
+
+            mission = body.get("data", {})
+            logs = mission.get("log_entries", [])
+            artifacts = mission.get("artifacts", [])
+
+            # Consider complete when at least one answer-type log entry exists
+            has_answer = any(
+                e.get("message_type") in ("answer", "completed") or e.get("status") == "Completed"
+                for e in logs
+            )
+            if has_answer or artifacts:
+                # Extract the final answer text
+                answer_text = ""
+                for entry in reversed(logs):
+                    if entry.get("message_type") in ("answer", "completed"):
+                        answer_text = entry.get("content", "")
+                        break
+                if not answer_text and logs:
+                    answer_text = logs[-1].get("content", "")
+
+                return json.dumps({
+                    "thread_id": thread_id,
+                    "status": "completed",
+                    "answer": answer_text,
+                    "artifacts": [
+                        {"title": a.get("title", ""), "type": a.get("type", ""), "content": a.get("content", "")}
+                        for a in artifacts
+                    ],
+                    "log_count": len(logs),
+                }, indent=2)
         except Exception:
             pass
-        time.sleep(3)
+        time.sleep(4)
 
     return json.dumps({
         "thread_id": thread_id,
         "status": "pending",
-        "note": f"Pipeline still running after {poll_seconds}s. Call again to check.",
+        "note": f"Pipeline still running after {poll_seconds}s. Call get_pipeline_result again to check.",
     })
 
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ohwise-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server connecting AI coding agents to graph-native code context and multi-agent pipelines."
 readme = "README.md"
 requires-python = ">=3.10"
