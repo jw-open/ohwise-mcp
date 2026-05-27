@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ohwise-mcp"
+version = "0.1.0"
+description = "MCP server connecting AI coding agents to graph-native code context and multi-agent pipelines."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    { name = "jw-open", email = "176761431+jw-open@users.noreply.github.com" },
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "knowledge-graph",
+    "code-analysis",
+    "rag",
+    "llm",
+    "context-engineering",
+    "agents",
+    "multi-agent",
+    "pagerank",
+    "claude-code",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+code = [
+    "codebase2graph>=0.1.0",
+]
+docs = [
+    "docs2graph>=0.3.0",
+]
+all = [
+    "codebase2graph>=0.1.0",
+    "docs2graph>=0.3.0",
+]
+dev = [
+    "pytest>=7.0",
+    "codebase2graph>=0.1.0",
+    "docs2graph>=0.3.0",
+]
+
+[project.urls]
+Homepage   = "https://github.com/jw-open/ohwise-mcp"
+Repository = "https://github.com/jw-open/ohwise-mcp"
+Issues     = "https://github.com/jw-open/ohwise-mcp/issues"
+Changelog  = "https://github.com/jw-open/ohwise-mcp/blob/main/CHANGELOG.md"
+
+[project.scripts]
+ohwise-mcp = "ohwise_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ohwise_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
