@@ -86,7 +86,7 @@ def _resolve_code_graph(
     try:
         from code2graph import build_graph  # type: ignore
     except ImportError:
-        return None, "code2graph not installed. Run: pip install code2graph"
+        return None, "codebase2graph not installed. Run: pip install codebase2graph"
 
     if graph_id and graph_id in _graph_cache:
         return _graph_cache[graph_id], None
@@ -214,7 +214,7 @@ def build_code_graph(
     try:
         from code2graph import build_graph  # type: ignore
     except ImportError:
-        return json.dumps({"error": "code2graph not installed. Run: pip install code2graph"})
+        return json.dumps({"error": "codebase2graph not installed. Run: pip install codebase2graph"})
 
     path = str(Path(repo_path).resolve())
     key = _graph_cache_key(path, graph_type)

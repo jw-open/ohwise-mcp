@@ -146,34 +146,28 @@ class TestBuildDocGraph:
 # Studio pipeline tools (no backend — just check error messages)
 # ---------------------------------------------------------------------------
 
-class TestRunAgent:
+class TestStartPipeline:
     def test_missing_env_returns_error(self):
-        from ohwise_mcp.server import run_agent
+        from ohwise_mcp.server import start_pipeline
 
-        env_backup = os.environ.pop("AGENT_BASE_URL", None)
-        ohwise_backup = os.environ.pop("OHWISE_URL", None)
+        env_backup = os.environ.pop("OHWISE_URL", None)
         try:
-            result = json.loads(run_agent("test task"))
+            result = json.loads(start_pipeline("test task"))
             assert "error" in result
-            assert "AGENT_BASE_URL" in result["error"]
+            assert "OHWISE_URL" in result["error"]
         finally:
             if env_backup:
-                os.environ["AGENT_BASE_URL"] = env_backup
-            if ohwise_backup:
-                os.environ["OHWISE_URL"] = ohwise_backup
+                os.environ["OHWISE_URL"] = env_backup
 
 
-class TestGetAgentResult:
+class TestGetPipelineResult:
     def test_missing_env_returns_error(self):
-        from ohwise_mcp.server import get_agent_result
+        from ohwise_mcp.server import get_pipeline_result
 
-        env_backup = os.environ.pop("AGENT_BASE_URL", None)
-        ohwise_backup = os.environ.pop("OHWISE_URL", None)
+        env_backup = os.environ.pop("OHWISE_URL", None)
         try:
-            result = json.loads(get_agent_result("test-thread-id", poll_seconds=1))
+            result = json.loads(get_pipeline_result("test-thread-id", poll_seconds=1))
             assert "error" in result or "status" in result
         finally:
             if env_backup:
-                os.environ["AGENT_BASE_URL"] = env_backup
-            if ohwise_backup:
-                os.environ["OHWISE_URL"] = ohwise_backup
+                os.environ["OHWISE_URL"] = env_backup

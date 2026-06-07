@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 code = [
-    "code2graph>=0.1.0",
+    "codebase2graph>=0.1.0",
 ]
 docs = [
     "docs2graph>=0.3.0",
@@ -59,7 +59,7 @@ sql = [
     "sqlalchemy>=2.0",
 ]
 all = [
-    "code2graph>=0.1.0",
+    "codebase2graph>=0.1.0",
     "docs2graph>=0.3.0",
     "pymongo>=4.0",
     "redis>=4.0",
@@ -68,7 +68,7 @@ all = [
 ]
 dev = [
     "pytest>=7.0",
-    "code2graph>=0.1.0",
+    "codebase2graph>=0.1.0",
     "docs2graph>=0.3.0",
     "pymongo>=4.0",
     "redis>=4.0",
