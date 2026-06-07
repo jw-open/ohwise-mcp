@@ -33,6 +33,15 @@ Agent pipeline tools (require AGENT_BASE_URL + AGENT_TOKEN env vars):
     list_agents             — list available agents
     run_agent               — trigger an agent run asynchronously
     get_agent_result        — poll an agent run for results
+
+Knowledge API tools (require AGENT_BASE_URL + AGENT_TOKEN env vars):
+    knowledge_list          — list knowledge bases
+    knowledge_get           — get a knowledge base and its full graph
+    knowledge_query         — rank nodes in a knowledge graph by relevance to a query
+    knowledge_add_node      — add a node to a knowledge graph
+    knowledge_add_edge      — add a directed edge between two nodes
+    knowledge_update_node   — update a node's label, attributes, or content
+    knowledge_delete_node   — remove a node and its edges from a knowledge graph
 """
 
 from __future__ import annotations
@@ -1402,6 +1411,454 @@ def get_agent_result(
         "status": "pending",
         "note": f"Agent still running after {poll_seconds}s. Call get_agent_result again to continue polling.",
     })
+
+
+# ---------------------------------------------------------------------------
+# Knowledge API tools
+# ---------------------------------------------------------------------------
+
+def _knowledge_request(
+    method: str,
+    path: str,
+    body: Optional[dict] = None,
+) -> tuple[Any, Optional[str]]:
+    """HTTP call to the knowledge API. Returns (parsed_body, error_str)."""
+    import urllib.request
+    import urllib.error
+
+    base_url = _agent_base_url()
+    if not base_url:
+        return {}, "AGENT_BASE_URL environment variable not set."
+    if not _agent_token():
+        return {}, "AGENT_TOKEN environment variable not set."
+
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"{base_url}{path}",
+        data=data,
+        headers=_agent_headers(),
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read()), None
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read()).get("detail", str(exc))
+        except Exception:
+            detail = str(exc)
+        return {}, f"HTTP {exc.code}: {detail}"
+    except Exception as exc:
+        return {}, str(exc)
+
+
+@mcp.tool()
+def knowledge_list(page: int = 1, page_size: int = 20) -> str:
+    """
+    List all knowledge bases available to the current user.
+
+    Requires AGENT_BASE_URL and AGENT_TOKEN environment variables.
+
+    Parameters
+    ----------
+    page : int
+        Page number (1-indexed). Default: 1.
+    page_size : int
+        Results per page. Default: 20.
+    """
+    body, err = _knowledge_request("GET", f"/api/knowledge?page={page}&pageSize={page_size}")
+    if err:
+        return json.dumps({"error": err})
+    items = body.get("data", [])
+    return json.dumps({
+        "total": body.get("total", len(items)),
+        "page": body.get("page", page),
+        "items": [
+            {
+                "knowledge_id": k.get("knowledge_id", ""),
+                "name": k.get("knowledge_name") or k.get("name", ""),
+                "type": k.get("knowledge_type", ""),
+            }
+            for k in items
+        ],
+    }, indent=2)
+
+
+@mcp.tool()
+def knowledge_get(knowledge_id: str) -> str:
+    """
+    Get a knowledge base including its full graph (nodes and edges).
+
+    Requires AGENT_BASE_URL and AGENT_TOKEN environment variables.
+
+    Parameters
+    ----------
+    knowledge_id : str
+        UUID of the knowledge base.
+    """
+    body, err = _knowledge_request("GET", f"/api/knowledge/{knowledge_id}")
+    if err:
+        return json.dumps({"error": err})
+    data = body.get("data", body)
+    graph = data.get("knowledge_graph") or data.get("graph") or {}
+    return json.dumps({
+        "knowledge_id": data.get("knowledge_id", knowledge_id),
+        "name": data.get("knowledge_name") or data.get("name", ""),
+        "type": data.get("knowledge_type", ""),
+        "node_count": len(graph.get("nodes", [])),
+        "edge_count": len(graph.get("edges", [])),
+        "graph": graph,
+    }, indent=2)
+
+
+@mcp.tool()
+def knowledge_query(
+    knowledge_id: str,
+    query: str,
+    k: int = 10,
+) -> str:
+    """
+    Rank nodes in a knowledge graph by relevance to a natural language query.
+
+    Fetches the graph then scores nodes by token overlap with the query and
+    structural centrality. Returns the top-k nodes with their content.
+
+    Requires AGENT_BASE_URL and AGENT_TOKEN environment variables.
+
+    Parameters
+    ----------
+    knowledge_id : str
+        UUID of the knowledge base.
+    query : str
+        Natural language question or topic.
+    k : int
+        Number of top nodes to return. Default: 10.
+    """
+    body, err = _knowledge_request("GET", f"/api/knowledge/{knowledge_id}/graph")
+    if err:
+        return json.dumps({"error": err})
+
+    data = body.get("data", body)
+    nodes = data.get("nodes", [])
+    edges = data.get("edges", [])
+
+    # Centrality: count edge degree per node id
+    degree: dict[str, int] = {}
+    for e in edges:
+        degree[e.get("from", "")] = degree.get(e.get("from", ""), 0) + 1
+        degree[e.get("to", "")] = degree.get(e.get("to", ""), 0) + 1
+
+    query_tokens = set(query.lower().split())
+    scored = []
+    for node in nodes:
+        nid = node.get("id", "")
+        text = (
+            f"{node.get('label', '')} "
+            f"{' '.join(str(v) for v in (node.get('attributes') or {}).values())}"
+        ).lower()
+        overlap = sum(1 for t in query_tokens if t in text)
+        score = overlap * 3 + degree.get(nid, 0) * 0.1
+        if overlap > 0 or degree.get(nid, 0) > 1:
+            scored.append((score, node))
+
+    scored.sort(key=lambda x: -x[0])
+    top = scored[:k]
+
+    results = [
+        {
+            "id": node.get("id"),
+            "label": node.get("label"),
+            "attributes": node.get("attributes") or {},
+            "score": round(score, 2),
+        }
+        for score, node in top
+    ]
+
+    return json.dumps({
+        "knowledge_id": knowledge_id,
+        "query": query,
+        "total_nodes": len(nodes),
+        "top_nodes": results,
+    }, indent=2)
+
+
+@mcp.tool()
+def knowledge_add_node(
+    knowledge_id: str,
+    label: str,
+    attributes: str = "{}",
+    content: str = "",
+) -> str:
+    """
+    Add a new node to a knowledge graph.
+
+    Fetches the current graph, appends the node, writes it back, then
+    creates the node content record. The node ID is generated automatically.
+
+    Requires AGENT_BASE_URL and AGENT_TOKEN environment variables.
+
+    Parameters
+    ----------
+    knowledge_id : str
+        UUID of the knowledge base.
+    label : str
+        Short display name for the node.
+    attributes : str
+        JSON object of metadata (e.g. '{"status":"planned","kind":"feature"}').
+    content : str
+        Long-form description or body text for this node.
+    """
+    import uuid as _uuid
+
+    try:
+        attrs = json.loads(attributes)
+    except json.JSONDecodeError as exc:
+        return json.dumps({"error": f"Invalid attributes JSON: {exc}"})
+
+    # Fetch current graph
+    body, err = _knowledge_request("GET", f"/api/knowledge/{knowledge_id}/graph")
+    if err:
+        return json.dumps({"error": err})
+    data = body.get("data", body)
+    nodes = list(data.get("nodes", []))
+    edges = list(data.get("edges", []))
+
+    node_id = str(_uuid.uuid4())
+    nodes.append({"id": node_id, "label": label, "attributes": attrs})
+
+    # Write updated graph
+    _, err = _knowledge_request(
+        "PUT",
+        f"/api/knowledge/{knowledge_id}/graph",
+        {"knowledge_graph": {"nodes": nodes, "edges": edges}},
+    )
+    if err:
+        return json.dumps({"error": f"Graph update failed: {err}"})
+
+    # Create node content record
+    _, err = _knowledge_request(
+        "POST",
+        f"/api/knowledge/{knowledge_id}/node/{node_id}",
+        {"content": content},
+    )
+    if err:
+        return json.dumps({
+            "node_id": node_id,
+            "label": label,
+            "warning": f"Node added to graph but content record failed: {err}",
+        })
+
+    return json.dumps({
+        "node_id": node_id,
+        "label": label,
+        "attributes": attrs,
+        "knowledge_id": knowledge_id,
+    }, indent=2)
+
+
+@mcp.tool()
+def knowledge_add_edge(
+    knowledge_id: str,
+    from_node: str,
+    to_node: str,
+    edge_label: str,
+) -> str:
+    """
+    Add a directed edge between two nodes in a knowledge graph.
+
+    from_node and to_node can be node IDs (UUIDs) or label substrings
+    (first match used). Fetches the graph, appends the edge, writes it back.
+
+    Requires AGENT_BASE_URL and AGENT_TOKEN environment variables.
+
+    Parameters
+    ----------
+    knowledge_id : str
+        UUID of the knowledge base.
+    from_node : str
+        Source node ID or label substring.
+    to_node : str
+        Destination node ID or label substring.
+    edge_label : str
+        Relationship label (e.g. "depends_on", "implements", "blocks").
+    """
+    import uuid as _uuid
+
+    body, err = _knowledge_request("GET", f"/api/knowledge/{knowledge_id}/graph")
+    if err:
+        return json.dumps({"error": err})
+    data = body.get("data", body)
+    nodes = list(data.get("nodes", []))
+    edges = list(data.get("edges", []))
+
+    def _resolve_node(query: str) -> Optional[dict]:
+        # Exact ID match first
+        for n in nodes:
+            if n.get("id") == query:
+                return n
+        # Label substring
+        ql = query.lower()
+        for n in nodes:
+            if ql in n.get("label", "").lower():
+                return n
+        return None
+
+    src = _resolve_node(from_node)
+    if not src:
+        return json.dumps({"error": f"Source node '{from_node}' not found."})
+    tgt = _resolve_node(to_node)
+    if not tgt:
+        return json.dumps({"error": f"Target node '{to_node}' not found."})
+
+    edge_id = str(_uuid.uuid4())
+    edges.append({"id": edge_id, "from": src["id"], "to": tgt["id"], "label": edge_label})
+
+    _, err = _knowledge_request(
+        "PUT",
+        f"/api/knowledge/{knowledge_id}/graph",
+        {"knowledge_graph": {"nodes": nodes, "edges": edges}},
+    )
+    if err:
+        return json.dumps({"error": f"Graph update failed: {err}"})
+
+    return json.dumps({
+        "edge_id": edge_id,
+        "from": {"id": src["id"], "label": src.get("label")},
+        "to": {"id": tgt["id"], "label": tgt.get("label")},
+        "label": edge_label,
+        "knowledge_id": knowledge_id,
+    }, indent=2)
+
+
+@mcp.tool()
+def knowledge_update_node(
+    knowledge_id: str,
+    node_id: str,
+    label: Optional[str] = None,
+    attributes: Optional[str] = None,
+    content: Optional[str] = None,
+) -> str:
+    """
+    Update a node's label, attributes, or content in a knowledge graph.
+
+    Only the fields you provide are updated. Attributes must be a JSON object.
+
+    Requires AGENT_BASE_URL and AGENT_TOKEN environment variables.
+
+    Parameters
+    ----------
+    knowledge_id : str
+        UUID of the knowledge base.
+    node_id : str
+        UUID of the node to update.
+    label : str, optional
+        New display label.
+    attributes : str, optional
+        JSON object to merge into existing attributes.
+    content : str, optional
+        New long-form content for the node.
+    """
+    updated: list[str] = []
+
+    # Update graph structure if label or attributes changed
+    if label is not None or attributes is not None:
+        body, err = _knowledge_request("GET", f"/api/knowledge/{knowledge_id}/graph")
+        if err:
+            return json.dumps({"error": err})
+        data = body.get("data", body)
+        nodes = list(data.get("nodes", []))
+        edges = list(data.get("edges", []))
+
+        node = next((n for n in nodes if n.get("id") == node_id), None)
+        if not node:
+            return json.dumps({"error": f"Node '{node_id}' not found in graph."})
+
+        if label is not None:
+            node["label"] = label
+            updated.append("label")
+        if attributes is not None:
+            try:
+                new_attrs = json.loads(attributes)
+            except json.JSONDecodeError as exc:
+                return json.dumps({"error": f"Invalid attributes JSON: {exc}"})
+            node["attributes"] = {**(node.get("attributes") or {}), **new_attrs}
+            updated.append("attributes")
+
+        _, err = _knowledge_request(
+            "PUT",
+            f"/api/knowledge/{knowledge_id}/graph",
+            {"knowledge_graph": {"nodes": nodes, "edges": edges}},
+        )
+        if err:
+            return json.dumps({"error": f"Graph update failed: {err}"})
+
+    # Update node content
+    if content is not None:
+        _, err = _knowledge_request(
+            "PUT",
+            f"/api/knowledge/{knowledge_id}/node/{node_id}",
+            {"content": content},
+        )
+        if err:
+            return json.dumps({"error": f"Content update failed: {err}"})
+        updated.append("content")
+
+    return json.dumps({
+        "node_id": node_id,
+        "knowledge_id": knowledge_id,
+        "updated_fields": updated,
+    }, indent=2)
+
+
+@mcp.tool()
+def knowledge_delete_node(
+    knowledge_id: str,
+    node_id: str,
+) -> str:
+    """
+    Remove a node and all its edges from a knowledge graph.
+
+    Also deletes the node's content record. This is irreversible.
+
+    Requires AGENT_BASE_URL and AGENT_TOKEN environment variables.
+
+    Parameters
+    ----------
+    knowledge_id : str
+        UUID of the knowledge base.
+    node_id : str
+        UUID of the node to remove.
+    """
+    body, err = _knowledge_request("GET", f"/api/knowledge/{knowledge_id}/graph")
+    if err:
+        return json.dumps({"error": err})
+    data = body.get("data", body)
+    nodes = [n for n in data.get("nodes", []) if n.get("id") != node_id]
+    edges = [e for e in data.get("edges", []) if e.get("from") != node_id and e.get("to") != node_id]
+
+    removed_nodes = len(data.get("nodes", [])) - len(nodes)
+    removed_edges = len(data.get("edges", [])) - len(edges)
+
+    if removed_nodes == 0:
+        return json.dumps({"error": f"Node '{node_id}' not found in graph."})
+
+    _, err = _knowledge_request(
+        "PUT",
+        f"/api/knowledge/{knowledge_id}/graph",
+        {"knowledge_graph": {"nodes": nodes, "edges": edges}},
+    )
+    if err:
+        return json.dumps({"error": f"Graph update failed: {err}"})
+
+    # Best-effort delete content record (may not exist)
+    _knowledge_request("DELETE", f"/api/knowledge/{knowledge_id}/node/{node_id}")
+
+    return json.dumps({
+        "node_id": node_id,
+        "knowledge_id": knowledge_id,
+        "removed_nodes": removed_nodes,
+        "removed_edges": removed_edges,
+    }, indent=2)
 
 
 # ---------------------------------------------------------------------------
