@@ -7,6 +7,44 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0] — 2026-06-07
+
+### Added
+
+**Code graph — context engineering**
+- `get_task_context(query, repo_path, graph_type, k)` — build graph + rank nodes in one call; returns a Markdown-formatted context block ready to prepend to a prompt
+- `get_node_detail(node_id, graph_id, repo_path, graph_type)` — full node content (untruncated) + all incoming/outgoing edges with neighbor summaries
+- `find_impact(node_id, graph_id, repo_path, graph_type, depth)` — reverse reachability: find all callers and importers of a node, grouped by hop distance
+- `trace_call_path(source_node, target_node, graph_id, repo_path, graph_type)` — BFS shortest directed path between two nodes; surfaces data/control flow
+- `diff_graph(repo_path, since_commit, graph_type)` — git diff + graph overlay: nodes whose source files changed since a given commit
+
+**Schema graph**
+- `schema_context(query, ddl, k)` — Personalized PageRank over a schema graph; returns the minimal set of tables + relationships for SQL generation. Accepts raw DDL (no DB needed) or a live DB via `DATABASE_URL` env var
+
+**Document store tools** (require `MONGO_URI` env var)
+- `query_collection(collection, filter_json, database, limit)` — query a document collection with MongoDB filter syntax
+- `list_collections(database)` — list collections in a database; pass `__databases__` to list all databases
+- `infer_collection_schema(collection, database, sample_size)` — infer field types, examples, and coverage % by sampling documents
+
+**Cache tools** (require `REDIS_URL` env var)
+- `cache_get(key)` — get a value by key; auto-parses JSON values
+- `cache_keys(pattern, count)` — non-blocking SCAN for keys matching a glob pattern
+- `cache_publish(channel, message)` — publish to a pub/sub channel; returns receiver count
+
+**Agent pipeline tools** (require `AGENT_BASE_URL` + `AGENT_TOKEN` env vars)
+- `list_agents()` — list all available agents from the configured backend
+- `run_agent(agent_id, user_input)` — renamed from `start_pipeline`; invoke an agent asynchronously
+- `get_agent_result(thread_id, poll_seconds)` — renamed from `get_pipeline_result`; poll for result
+
+### Changed
+- FastMCP server name changed from `ohwise` to `graph-context`; all tool descriptions made provider-agnostic
+- `start_pipeline` / `get_pipeline_result` renamed to `run_agent` / `get_agent_result`
+- Agent backend env vars: `AGENT_BASE_URL` / `AGENT_TOKEN` (legacy `OHWISE_URL` / `OHWISE_TOKEN` still accepted as fallback)
+- Extracted `_resolve_code_graph`, `_find_node`, `_rank_nodes` helpers to eliminate duplication
+- New optional extras: `[mongo]`, `[redis]`, `[sql]`; `[all]` now includes all six optional deps
+
+---
+
 ## [0.1.0] — 2026-05-27
 
 Initial release.

@@ -1,3 +1,3 @@
-"""ohwise-mcp — MCP server connecting AI coding agents to OhWise graph tools and pipelines."""
+"""ohwise-mcp — MCP server exposing graph-native context, document store, cache, and agent pipeline tools."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
