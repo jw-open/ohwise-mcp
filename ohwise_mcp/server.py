@@ -49,6 +49,8 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP(
     "graph-context",
+    host=os.environ.get("MCP_HOST", "127.0.0.1"),
+    port=int(os.environ.get("MCP_PORT", "8000")),
     instructions=(
         "Graph-native context and analysis tools for AI coding agents. "
         "Use build_code_graph + rank_code_nodes (or get_task_context) to retrieve "
@@ -1407,7 +1409,15 @@ def get_agent_result(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    mcp.run()
+    import argparse
+    p = argparse.ArgumentParser(description="Graph-context MCP server")
+    p.add_argument(
+        "--transport",
+        default=os.environ.get("MCP_TRANSPORT", "stdio"),
+        choices=["stdio", "sse", "streamable-http"],
+    )
+    args, _ = p.parse_known_args()
+    mcp.run(transport=args.transport)
 
 
 if __name__ == "__main__":
