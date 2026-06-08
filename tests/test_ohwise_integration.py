@@ -89,6 +89,26 @@ class TestListAgentsIntegration:
 # knowledge_list
 # ---------------------------------------------------------------------------
 
+class TestKnowledgeInspect:
+    def test_print_knowledge_list(self, capsys):
+        from ohwise_mcp.server import knowledge_list
+
+        result = json.loads(knowledge_list(page_size=50))
+        print(json.dumps(result, indent=2))
+        assert "error" not in result
+
+    def test_print_knowledge_detail(self, capsys):
+        from ohwise_mcp.server import knowledge_list, knowledge_get
+
+        items = json.loads(knowledge_list(page_size=50))["items"]
+        for item in items:
+            detail = json.loads(knowledge_get(item["knowledge_id"]))
+            print(json.dumps(detail, indent=2))
+        assert True
+
+
+# ---------------------------------------------------------------------------
+
 class TestKnowledgeListIntegration:
     def test_returns_items_list(self):
         from ohwise_mcp.server import knowledge_list
