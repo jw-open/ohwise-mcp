@@ -1269,7 +1269,7 @@ def list_agents() -> str:
 
     try:
         req = urllib.request.Request(
-            f"{base_url}/api/agents",
+            f"{base_url}/api/agent",
             headers=_agent_headers(),
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
