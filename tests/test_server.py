@@ -321,7 +321,8 @@ class TestSchemaContext:
         pytest.importorskip("graph2sql")
         from ohwise_mcp.server import schema_context
 
-        result = json.loads(schema_context("revenue by customer", ddl=self._DDL, k=2))
+        # Query uses vocabulary present in the DDL so PageRank finds seed nodes
+        result = json.loads(schema_context("orders total per user", ddl=self._DDL, k=2))
         assert "```sql" in result["context"] or len(result["tables"]) > 0
 
     def test_missing_ddl_and_db_url_returns_error(self):
